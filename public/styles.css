@@ -126,7 +126,8 @@ a {
   gap: 10px;
 }
 .brand .logo {
-  display: none;
+  display: block;
+  border-radius: 7px;
   width: 30px;
   height: 30px;
 }
