@@ -129,7 +129,6 @@ a {
 }
 .brand .logo {
   display: block;
-  border-radius: 7px;
   width: 30px;
   height: 30px;
 }
@@ -1479,11 +1478,9 @@ textarea {
   font-family: Rajdhani, ui-sans-serif, system-ui, sans-serif;
 }
 
-/* The logo is a thin outline on a dark field, so at 30px against a near-black
-   header it read as a smudge. The glow is what makes a neon sign legible. */
-.brand .logo {
-  filter: drop-shadow(0 0 5px var(--glow));
-}
+/* The mark carries its own light and fades out at its edges, so it needs
+   neither the red drop-shadow nor the corner rounding that the old photo tile
+   did — there is no square edge left to round. */
 
 .wordmark {
   font-size: 23px;
