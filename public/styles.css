@@ -2,20 +2,21 @@
 
 :root {
   color-scheme: dark;
-  --bg: #0b0b0f;
-  --raised: #15151c;
+  --bg: #07070a;
+  --raised: #101017;
   --hover: rgba(255, 255, 255, 0.04);
   --text: #ededf2;
   --muted: #8b8b99;
-  --border: #23232d;
-  --accent: #8f78ff;
-  --accent-soft: rgba(143, 120, 255, 0.14);
+  --border: #1c1c24;
+  --accent: #ff2a2a;
+  --accent-soft: rgba(255, 42, 42, 0.13);
+  --glow: rgba(255, 42, 42, 0.45);
   --primary-bg: #ededf2;
   --primary-text: #0b0b0f;
   --like: #ff3d8b;
-  --news: #22c58b;
+  --news: #f0b429;
   --danger: #ff4d5e;
-  --header: rgba(11, 11, 15, 0.78);
+  --header: rgba(7, 7, 10, 0.78);
   --col: 600px;
 }
 
@@ -28,12 +29,13 @@
     --text: #121217;
     --muted: #6b6b78;
     --border: #ebebf0;
-    --accent: #6d4aff;
-    --accent-soft: rgba(109, 74, 255, 0.1);
+    --accent: #d61f1f;
+    --accent-soft: rgba(214, 31, 31, 0.08);
+    --glow: rgba(214, 31, 31, 0.28);
     --primary-bg: #121217;
     --primary-text: #ffffff;
     --like: #f0186f;
-    --news: #0e9f6e;
+    --news: #a3761a;
     --danger: #e0243a;
     --header: rgba(255, 255, 255, 0.82);
   }
@@ -1436,5 +1438,111 @@ textarea {
   }
   .account > summary > .icon {
     display: inline-grid;
+  }
+}
+
+
+/* ==========================================================================
+   Identity pass
+   The palette above was the purple-to-pink default that almost every social
+   template ships with, which made this look like all of them. The logo is a
+   neon-red sign and the sibling game runs on the same red, so the accent now
+   comes from the brand instead of from the template.
+   ========================================================================== */
+
+/* Self-hosted rather than loaded from Google: public/_headers sets
+   default-src 'self' with no font-src or style-src exception, so an external
+   stylesheet is blocked outright — the font would silently never arrive and
+   everything would fall back to the system stack. Two latin subsets, ~15KB
+   each, and the strict CSP stays as it is. Rajdhani is OFL licensed. */
+@font-face {
+  font-family: Rajdhani;
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/rajdhani-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: Rajdhani;
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/rajdhani-700.woff2") format("woff2");
+}
+
+/* Display face for the marks and labels only. Post bodies stay on the system
+   stack, which is more readable at 15px and does not cost a webfont wait. */
+.wordmark,
+.badge,
+.side h2,
+.tabs button {
+  font-family: Rajdhani, ui-sans-serif, system-ui, sans-serif;
+}
+
+/* The logo is a thin outline on a dark field, so at 30px against a near-black
+   header it read as a smudge. The glow is what makes a neon sign legible. */
+.brand .logo {
+  filter: drop-shadow(0 0 5px var(--glow));
+}
+
+.wordmark {
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: currentColor;
+  color: var(--accent);
+  text-shadow: 0 0 14px var(--glow);
+}
+
+/* Avatars were rainbow hsl() gradients — the stock placeholder look, and six
+   competing hues per screen. Outlined instead, echoing the logo, which is
+   itself an outline of a head. */
+.avatar {
+  background: var(--raised);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 0 0 1px rgba(255, 42, 42, 0.1);
+  font-weight: 700;
+}
+.post:hover .avatar {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* The rail was a stack of outlined 16px pills — the single most template-like
+   thing left on the page. Dropping the outline for a slightly lifted surface
+   lets the panels sit in the page instead of on top of it. */
+.card {
+  border: none;
+  border-radius: 12px;
+  background: var(--raised);
+}
+
+/* The feed divider is doing the separating now, so give it a little more
+   presence than the panel edges it used to compete with. */
+.post {
+  border-bottom-color: color-mix(in srgb, var(--border) 85%, var(--accent));
+}
+
+.side h2 {
+  letter-spacing: 0.02em;
+}
+
+.badge {
+  border-radius: 3px;
+  letter-spacing: 0.08em;
+}
+
+/* The right rail is only a rail above 1024px, where .panel gives each block a
+   1px outline and a 16px radius — a stack of pills beside a stack of pills,
+   which was the most template-like thing left on the page. Same lifted surface
+   as .card instead, so the panels sit in the page rather than on top of it. */
+@media (min-width: 1024px) {
+  .panel {
+    border: none;
+    border-radius: 12px;
+    background: var(--raised);
   }
 }
