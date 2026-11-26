@@ -10,15 +10,16 @@ import { sendSignInLink } from "./mail";
 import { MEDIA_KEY_RE, sniffImage } from "./media";
 import { postNews } from "./news";
 import { canMessage, createTweet, MAX_TWEET_CHARS, setFollow, setLike, tweetLength } from "./social";
+import { createShadeUser, findShadeUserIdByEmail } from "./shade";
 import { syncMembers } from "./sync";
 
-type User = { id: number; username: string; display_name: string; bio: string };
+type User = { id: string; username: string; display_name: string; bio: string };
 type AppEnv = { Bindings: Env; Variables: { user: User | null } };
 type Ctx = Context<AppEnv>;
 
 type TweetRow = {
   id: number;
-  user_id: number;
+  user_id: string;
   body: string;
   media_key: string | null;
   reply_to: number | null;
@@ -63,7 +64,7 @@ function requireUser(c: Ctx): User {
   return c.get("user") ?? fail(401, "Log in first");
 }
 
-const viewerId = (c: Ctx) => c.get("user")?.id ?? 0;
+const viewerId = (c: Ctx) => c.get("user")?.id ?? "";
 
 function parseId(raw: string | undefined): number {
   if (!raw || !/^\d{1,15}$/.test(raw)) fail(404, "Not found");
@@ -133,7 +134,7 @@ async function getTweet(c: Ctx, id: number) {
   return row ? toTweet(row) : null;
 }
 
-type Account = { id: number; username: string; display_name: string; kind: string };
+type Account = { id: string; username: string; display_name: string; kind: string };
 
 async function findUser(c: Ctx, username: string | undefined): Promise<Account> {
   const row = await c.env.DB.prepare(
@@ -144,7 +145,7 @@ async function findUser(c: Ctx, username: string | undefined): Promise<Account> 
   return row ?? fail(404, "User not found");
 }
 
-async function startSession(c: Ctx, userId: number) {
+async function startSession(c: Ctx, userId: string) {
   const token = newToken();
   await c.env.DB.batch([
     c.env.DB.prepare(`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?1, ?2, unixepoch() + ?3)`).bind(
@@ -210,13 +211,25 @@ app.post("/api/signup", async (c) => {
   if (email && (email.length > 254 || !EMAIL_RE.test(email))) fail(400, "That email address doesn't look right");
 
   const { hash, salt } = await hashPassword(password);
+
+  // One person, one id. The id comes from shade so the game character this
+  // person is about to get stays attached to the same account they use here.
+  // An existing shade account on the same email is reused rather than
+  // duplicated. If shade cannot be written to, the signup still goes ahead on a
+  // locally minted id — a social account without a game account beats no
+  // account — and the member sync reconciles it later.
+  const id =
+    (email ? await findShadeUserIdByEmail(c.env, email) : null) ??
+    (await createShadeUser(c.env, { username, email, displayName })) ??
+    Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+
   let user: User | null;
   try {
     user = await c.env.DB.prepare(
-      `INSERT INTO users (username, display_name, email, password_hash, password_salt)
-       VALUES (?1, ?2, ?3, ?4, ?5) RETURNING id, username, display_name, bio`,
+      `INSERT INTO users (id, username, display_name, email, password_hash, password_salt)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING id, username, display_name, bio`,
     )
-      .bind(username, displayName, email, hash, salt)
+      .bind(id, username, displayName, email, hash, salt)
       .first<User>();
   } catch (err) {
     const msg = String(err);
@@ -263,7 +276,7 @@ app.post("/api/email-link", async (c) => {
      FROM users WHERE email = ?1 AND kind = 'human'`,
   )
     .bind(email, EMAIL_LINK_TTL)
-    .first<{ id: number; recent: number }>();
+    .first<{ id: string; recent: number }>();
   // At most one email every two minutes per account, so this can't be used to flood an inbox.
   if (user && !user.recent) {
     const token = newToken();
@@ -291,7 +304,7 @@ app.post("/api/setup-password", async (c) => {
     `DELETE FROM password_setups WHERE token_hash = ?1 AND expires_at > unixepoch() RETURNING user_id`,
   )
     .bind(await sha256Hex(token))
-    .first<{ user_id: number }>();
+    .first<{ user_id: string }>();
   if (!claimed) fail(400, invalid);
 
   const { hash, salt } = await hashPassword(password);
@@ -390,7 +403,7 @@ app.get("/api/foryou", async (c) => {
 
   // Greedy pick with a per-author penalty for diversity.
   const ranked: TweetRow[] = [];
-  const perAuthor = new Map<number, number>();
+  const perAuthor = new Map<string, number>();
   const pool = [...scored];
   while (pool.length && ranked.length < offset + PAGE_SIZE) {
     let best = 0;
@@ -489,7 +502,7 @@ app.get("/api/tweets/:id", async (c) => {
 app.delete("/api/tweets/:id", async (c) => {
   const user = requireUser(c);
   const id = parseId(c.req.param("id"));
-  const tweet = await c.env.DB.prepare(`SELECT user_id FROM tweets WHERE id = ?1`).bind(id).first<{ user_id: number }>();
+  const tweet = await c.env.DB.prepare(`SELECT user_id FROM tweets WHERE id = ?1`).bind(id).first<{ user_id: string }>();
   if (!tweet) fail(404, "Post not found");
   if (tweet.user_id !== user.id) fail(403, "You can only delete your own posts");
 
@@ -533,7 +546,7 @@ app.get("/api/users/:username", async (c) => {
   )
     .bind(c.req.param("username"), viewerId(c))
     .first<{
-      id: number;
+      id: string;
       username: string;
       display_name: string;
       bio: string;
@@ -681,7 +694,7 @@ app.get("/api/messages/:username", async (c) => {
      ) ORDER BY id ASC`,
   )
     .bind(user.id, other.id, after)
-    .all<{ id: number; sender_id: number; body: string; created_at: number }>();
+    .all<{ id: number; sender_id: string; body: string; created_at: number }>();
   if (results.some((m) => m.sender_id === other.id)) {
     await c.env.DB.prepare(
       `UPDATE messages SET read_at = unixepoch() WHERE sender_id = ?1 AND recipient_id = ?2 AND read_at IS NULL`,

@@ -85,7 +85,7 @@ async function summarize(env: Env, feed: NewsFeed, item: Item): Promise<string> 
 }
 
 /** Posts up to `perFeed` new stories per feed. Returns how many were posted. */
-export async function postNews(env: Env, accounts: Map<string, number>, perFeed: number): Promise<number> {
+export async function postNews(env: Env, accounts: Map<string, string>, perFeed: number): Promise<number> {
   const maxAge = 24 * 60 * 60;
   const now = Date.now() / 1000;
   let posted = 0;

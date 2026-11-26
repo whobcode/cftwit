@@ -113,23 +113,23 @@ function systemPrompt(p: Persona): string {
 }
 
 /** Creates any missing persona and news accounts; returns username -> id for all of them. */
-export async function ensureAccounts(env: Env): Promise<Map<string, number>> {
+export async function ensureAccounts(env: Env): Promise<Map<string, string>> {
   const rows = [
     ...PERSONAS.map((p) => ({ username: p.username, name: p.name, bio: p.bio, kind: "ai" })),
     ...NEWS_FEEDS.map((f) => ({ username: f.username, name: f.name, bio: newsBio(f), kind: "news" })),
-  ].map((r) => ({ ...r, hash: randomHex(32), salt: randomHex(16) }));
+  ].map((r) => ({ ...r, id: randomHex(16), hash: randomHex(32), salt: randomHex(16) }));
 
   // Nobody knows these passwords: bot accounts are never logged into.
   await env.DB.prepare(
-    `INSERT OR IGNORE INTO users (username, display_name, bio, password_hash, password_salt, kind, activated)
-     SELECT j.value ->> 'username', j.value ->> 'name', j.value ->> 'bio', j.value ->> 'hash', j.value ->> 'salt', j.value ->> 'kind', 1
+    `INSERT OR IGNORE INTO users (id, username, display_name, bio, password_hash, password_salt, kind, activated)
+     SELECT j.value ->> 'id', j.value ->> 'username', j.value ->> 'name', j.value ->> 'bio', j.value ->> 'hash', j.value ->> 'salt', j.value ->> 'kind', 1
      FROM json_each(?1) AS j`,
   )
     .bind(JSON.stringify(rows))
     .run();
 
   const { results } = await env.DB.prepare(`SELECT id, username FROM users WHERE kind IN ('ai', 'news')`).all<{
-    id: number;
+    id: string;
     username: string;
   }>();
   return new Map(results.map((r) => [r.username.toLowerCase(), r.id]));
@@ -150,14 +150,14 @@ async function writeOriginalPost(env: Env, p: Persona, headlines: string[]): Pro
   return cleanPost(await generate(env, [{ role: "system", content: systemPrompt(p) }, { role: "user", content: prompt }]), 280);
 }
 
-async function postAs(env: Env, accounts: Map<string, number>, p: Persona, headlines: string[]) {
+async function postAs(env: Env, accounts: Map<string, string>, p: Persona, headlines: string[]) {
   const userId = accounts.get(p.username);
   const body = userId && (await writeOriginalPost(env, p, headlines));
   if (userId && body) await createTweet(env.DB, { userId, body });
 }
 
 /** One reply from a persona, preferring people's posts that no AI has answered yet. */
-async function replyToSomeone(env: Env, accounts: Map<string, number>) {
+async function replyToSomeone(env: Env, accounts: Map<string, string>) {
   const target = await env.DB.prepare(
     `SELECT t.id, t.body, u.username, u.kind FROM tweets t JOIN users u ON u.id = t.user_id
      WHERE t.reply_to IS NULL AND t.created_at > unixepoch() - 86400 AND t.body != ''
@@ -182,14 +182,14 @@ async function replyToSomeone(env: Env, accounts: Map<string, number>) {
   if (body) await createTweet(env.DB, { userId, body, replyTo: target.id });
 }
 
-async function likeSome(env: Env, accounts: Map<string, number>, count: number) {
+async function likeSome(env: Env, accounts: Map<string, string>, count: number) {
   const { results } = await env.DB.prepare(
     `SELECT t.id, t.user_id FROM tweets t JOIN users u ON u.id = t.user_id
      WHERE t.created_at > unixepoch() - 172800
      ORDER BY (u.kind = 'human') DESC, random() LIMIT ?1`,
   )
     .bind(count)
-    .all<{ id: number; user_id: number }>();
+    .all<{ id: number; user_id: string }>();
   for (const t of results) {
     const liker = accounts.get(pick(PERSONAS).username);
     if (liker && liker !== t.user_id) await setLike(env.DB, liker, t.id, true);
@@ -204,15 +204,15 @@ async function followBack(env: Env) {
      JOIN users p ON p.id = f.follower_id AND p.kind = 'human'
      WHERE NOT EXISTS (SELECT 1 FROM follows x WHERE x.follower_id = f.followee_id AND x.followee_id = f.follower_id)
      LIMIT 20`,
-  ).all<{ bot: number; person: number }>();
+  ).all<{ bot: string; person: string }>();
   for (const r of results) await setFollow(env.DB, r.bot, r.person, true);
 }
 
 /** First run: personas follow each other and the news accounts, and each posts twice. */
-async function seed(env: Env, accounts: Map<string, number>) {
-  const ai = PERSONAS.map((p) => accounts.get(p.username)).filter(Boolean) as number[];
-  const news = NEWS_FEEDS.map((f) => accounts.get(f.username)).filter(Boolean) as number[];
-  const pairs: [number, number][] = [];
+async function seed(env: Env, accounts: Map<string, string>) {
+  const ai = PERSONAS.map((p) => accounts.get(p.username)).filter(Boolean) as string[];
+  const news = NEWS_FEEDS.map((f) => accounts.get(f.username)).filter(Boolean) as string[];
+  const pairs: [string, string][] = [];
   for (const a of ai) {
     for (const b of ai) if (a !== b && chance(0.45)) pairs.push([a, b]);
     for (const n of news) if (chance(0.5)) pairs.push([a, n]);
@@ -229,7 +229,7 @@ async function seed(env: Env, accounts: Map<string, number>) {
   }
 }
 
-export async function runBots(env: Env, accounts: Map<string, number>) {
+export async function runBots(env: Env, accounts: Map<string, string>) {
   const aiIds = PERSONAS.map((p) => accounts.get(p.username)).filter(Boolean);
   const existing = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM tweets WHERE user_id IN (SELECT value FROM json_each(?1))`,
@@ -251,7 +251,7 @@ export async function runBots(env: Env, accounts: Map<string, number>) {
 }
 
 /** A persona answers a DM. Runs after the sender's message is saved. */
-export async function replyToDirectMessage(env: Env, botId: number, personId: number) {
+export async function replyToDirectMessage(env: Env, botId: string, personId: string) {
   const bot = await env.DB.prepare(`SELECT username FROM users WHERE id = ?1 AND kind = 'ai'`).bind(botId).first<{
     username: string;
   }>();
@@ -264,7 +264,7 @@ export async function replyToDirectMessage(env: Env, botId: number, personId: nu
      ORDER BY id DESC LIMIT 10`,
   )
     .bind(botId, personId)
-    .all<{ sender_id: number; body: string }>();
+    .all<{ sender_id: string; body: string }>();
   const history: ChatMessage[] = results.reverse().map((m) => ({
     role: m.sender_id === botId ? "assistant" : "user",
     content: m.body,

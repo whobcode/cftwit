@@ -22,7 +22,7 @@ type Member = {
 };
 
 type LocalUser = {
-  id: number;
+  id: string;
   email: string | null;
   username: string;
   source: Source | null;
@@ -147,6 +147,28 @@ async function shadeMembers(env: Env): Promise<Member[]> {
   }));
 }
 
+/**
+ * email -> shade users.id, used to adopt shade's id space rather than mint a
+ * parallel one. Deliberately NOT filtered the way shadeMembers() is: that query
+ * skips the rows shade copied from 8hues, but those are exactly the people who
+ * would otherwise end up with one id here and a different one in shade, leaving
+ * their game character attached to neither.
+ *
+ * A failure here is not fatal — ids are minted locally instead, and a later
+ * tick can still adopt the shade id for anyone imported in the meantime.
+ */
+async function shadeIdsByEmail(env: Env): Promise<Map<string, string>> {
+  try {
+    const { results } = await env.SHADE_DB.prepare(
+      `SELECT id, lower(trim(email)) AS email FROM users WHERE email IS NOT NULL AND email <> ''`,
+    ).all<{ id: string; email: string }>();
+    return new Map(results.map((r) => [r.email, String(r.id)]));
+  } catch (err) {
+    console.error("member sync: shade id lookup failed", String(err));
+    return new Map();
+  }
+}
+
 // ---------- sync ----------
 
 /** Source databases are busy with their own crons; a read can hit "D1 DB ... was reset". Retry briefly. */
@@ -178,6 +200,7 @@ export async function syncMembers(env: Env) {
     ).all<LocalUser>(),
   ]);
   if (!huesResult && !shadeResult) throw new Error("member sync: both sources failed");
+  const shadeIds = await shadeIdsByEmail(env);
   const hues = huesResult ?? [];
   const shade = shadeResult ?? [];
   const loadedSources = new Set<Source>([...(huesResult?.length ? ["8hues" as const] : []), ...(shadeResult?.length ? ["shade" as const] : [])]);
@@ -191,7 +214,7 @@ export async function syncMembers(env: Env) {
   const present = new Set(sources.map((m) => `${m.source}:${m.sourceId}`));
 
   const inserts: unknown[] = [];
-  const passwordUpdates: { id: number; hash: string; salt: string }[] = [];
+  const passwordUpdates: { id: string; hash: string; salt: string }[] = [];
 
   for (const m of sources) {
     const existing = linked.get(`${m.source}:${m.sourceId}`);
@@ -206,7 +229,12 @@ export async function syncMembers(env: Env) {
     takenEmails.add(m.email);
 
     const usable = Boolean(m.hash && m.salt);
+    // A shade member already has an id in the shared space; an 8hues member who
+    // also exists in shade adopts theirs by email. Only someone shade has never
+    // seen gets a freshly minted one.
+    const sharedId = m.source === "shade" ? m.sourceId : (shadeIds.get(m.email) ?? null);
     inserts.push({
+      id: sharedId ?? toHex(crypto.getRandomValues(new Uint8Array(16))),
       username: uniqueUsername(usernameBase(m.handle, m.email), takenUsernames),
       display_name: [...(m.handle.trim() || m.email.split("@")[0])].slice(0, 50).join(""),
       email: m.email,
@@ -232,8 +260,8 @@ export async function syncMembers(env: Env) {
     statements.push(
       env.DB.prepare(
         `INSERT OR IGNORE INTO users
-           (username, display_name, email, password_hash, password_salt, pw_synced, created_at, source, source_id, activated)
-         SELECT j.value ->> 'username', j.value ->> 'display_name', j.value ->> 'email', j.value ->> 'hash',
+           (id, username, display_name, email, password_hash, password_salt, pw_synced, created_at, source, source_id, activated)
+         SELECT j.value ->> 'id', j.value ->> 'username', j.value ->> 'display_name', j.value ->> 'email', j.value ->> 'hash',
                 j.value ->> 'salt', j.value ->> 'pw_synced', j.value ->> 'created_at', j.value ->> 'source',
                 j.value ->> 'source_id', 0
          FROM json_each(?1) AS j`,

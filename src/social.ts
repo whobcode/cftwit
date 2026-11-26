@@ -26,7 +26,7 @@ export const extractMentions = (body: string) => uniqueMatches(MENTION_RE, body,
 export const extractTags = (body: string) => uniqueMatches(TAG_RE, body, 10);
 
 export type NewTweet = {
-  userId: number;
+  userId: string;
   body: string;
   replyTo?: number | null;
   mediaKey?: string | null;
@@ -77,7 +77,7 @@ export async function createTweet(db: D1Database, t: NewTweet): Promise<number> 
   return id;
 }
 
-export async function setLike(db: D1Database, userId: number, tweetId: number, liked: boolean) {
+export async function setLike(db: D1Database, userId: string, tweetId: number, liked: boolean) {
   if (!liked) {
     await db.prepare(`DELETE FROM likes WHERE user_id = ?1 AND tweet_id = ?2`).bind(userId, tweetId).run();
     return;
@@ -88,7 +88,7 @@ export async function setLike(db: D1Database, userId: number, tweetId: number, l
   ]);
 }
 
-export async function setFollow(db: D1Database, followerId: number, followeeId: number, following: boolean) {
+export async function setFollow(db: D1Database, followerId: string, followeeId: string, following: boolean) {
   if (!following) {
     await db
       .prepare(`DELETE FROM follows WHERE follower_id = ?1 AND followee_id = ?2`)
@@ -103,7 +103,7 @@ export async function setFollow(db: D1Database, followerId: number, followeeId: 
 }
 
 /** Someone may message you if you follow them, or once you've messaged them. */
-export async function canMessage(db: D1Database, senderId: number, recipient: { id: number; kind: string }) {
+export async function canMessage(db: D1Database, senderId: string, recipient: { id: string; kind: string }) {
   if (recipient.kind === "news" || recipient.id === senderId) return false;
   const row = await db
     .prepare(
