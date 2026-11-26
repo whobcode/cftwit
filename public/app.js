@@ -330,7 +330,7 @@ async function renderSide() {
       h(
         "section",
         { class: "panel join" },
-        h("h2", null, "New to cftwit?"),
+        h("h2", null, "New to me?"),
         h("p", null, "Sign up to post, follow people and get a For you feed tuned to you."),
         h("a", { class: "btn", href: "/signup", "data-link": true }, "Create account"),
         h("a", { class: "btn ghost", href: "/login", "data-link": true }, "Log in"),
@@ -388,7 +388,7 @@ async function renderSide() {
         ),
         "/explore",
       ),
-    h("p", { class: "side-foot" }, "Built on Cloudflare Workers, D1, R2 and Workers AI. Headlines from BBC News and NPR.", h("br"), `© ${new Date().getFullYear()} cftwit`),
+    h("p", { class: "side-foot" }, "Built on Cloudflare Workers, D1, R2 and Workers AI. Headlines from BBC News and NPR.", h("br"), `© ${new Date().getFullYear()} me`),
   ];
   side.replaceChildren(...panels.filter(Boolean));
 }
