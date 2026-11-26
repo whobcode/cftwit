@@ -280,10 +280,22 @@ app.post("/api/email-link", async (c) => {
   // At most one email every two minutes per account, so this can't be used to flood an inbox.
   if (user && !user.recent) {
     const token = newToken();
+    const tokenHash = await sha256Hex(token);
     await c.env.DB.prepare(`INSERT INTO password_setups (token_hash, user_id, expires_at) VALUES (?1, ?2, unixepoch() + ?3)`)
-      .bind(await sha256Hex(token), user.id, EMAIL_LINK_TTL)
+      .bind(tokenHash, user.id, EMAIL_LINK_TTL)
       .run();
-    c.executionCtx.waitUntil(sendSignInLink(c.env, email, `${new URL(c.req.url).origin}/setup#${token}`));
+    // If the send fails, drop the token again. It is unusable to the person
+    // either way, and leaving it behind makes the `recent` guard above suppress
+    // their next attempt for two minutes — turning a transient mail failure
+    // into a silent lockout, on the one path that exists for accounts with no
+    // password.
+    c.executionCtx.waitUntil(
+      sendSignInLink(c.env, email, `${new URL(c.req.url).origin}/setup#${token}`).then(async (sent) => {
+        if (!sent) {
+          await c.env.DB.prepare(`DELETE FROM password_setups WHERE token_hash = ?1`).bind(tokenHash).run();
+        }
+      }),
+    );
   }
   // Same answer either way, so this doesn't reveal which emails have accounts.
   return c.json({ ok: true });
